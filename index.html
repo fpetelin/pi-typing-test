@@ -88,19 +88,22 @@
     background: var(--panel);
     border: 1px solid var(--panel-border);
     border-radius: 12px;
-    padding: 24px;
+    padding: 20px 0;
     font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
     font-size: 18px;
     line-height: 1.9;
     letter-spacing: 0.5px;
     user-select: none;
-    min-height: 120px;
+    white-space: nowrap;
+    overflow: hidden;
     margin-bottom: 16px;
+    scroll-behavior: smooth;
   }
   .text-display .char {
     color: var(--muted);
     transition: color 0.05s linear;
   }
+
   .text-display .char.correct { color: var(--ok); }
   .text-display .char.incorrect { color: var(--err); background: rgba(255, 93, 93, 0.12); border-radius: 2px; }
   .text-display .char.extra { color: var(--err); }
@@ -243,6 +246,17 @@
       html += '<span class="' + cls + '">' + safe + "</span>";
     }
     textDisplay.innerHTML = html;
+    scrollToCursor();
+  }
+
+  function scrollToCursor() {
+    var current = textDisplay.querySelector(".char.current");
+    if (!current) return;
+    var container = textDisplay;
+    var charLeft = current.offsetLeft;
+    var target = charLeft - container.clientWidth * 0.3;
+    target = Math.max(0, Math.min(target, container.scrollWidth - container.clientWidth));
+    container.scrollLeft = target;
   }
 
   function elapsed() {
@@ -358,6 +372,7 @@
     hint.textContent = "Timer starts on your first keystroke. Type the text above.";
     results.classList.add("hidden");
     render();
+    textDisplay.scrollLeft = 0;
   }
 
   document.addEventListener("keydown", onKey);
