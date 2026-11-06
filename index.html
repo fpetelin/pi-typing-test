@@ -84,30 +84,34 @@
   }
   .stat .value.accent { color: var(--accent); }
   .stat .value.ok { color: var(--ok); }
-  .text-display {
+  .text-viewport {
     background: var(--panel);
     border: 1px solid var(--panel-border);
     border-radius: 12px;
     padding: 20px 0;
+    overflow: hidden;
+    margin-bottom: 16px;
+    position: relative;
+  }
+  .text-track {
+    display: inline-block;
+    white-space: nowrap;
+    padding: 0 40px;
     font-family: "Cascadia Code", "Fira Code", Consolas, monospace;
     font-size: 18px;
     line-height: 1.9;
     letter-spacing: 0.5px;
     user-select: none;
-    white-space: nowrap;
-    overflow: hidden;
-    margin-bottom: 16px;
-    scroll-behavior: smooth;
+    transition: transform 0.15s ease-out;
+    will-change: transform;
   }
-  .text-display .char {
+  .text-track .char {
     color: var(--muted);
     transition: color 0.05s linear;
   }
-
-  .text-display .char.correct { color: var(--ok); }
-  .text-display .char.incorrect { color: var(--err); background: rgba(255, 93, 93, 0.12); border-radius: 2px; }
-  .text-display .char.extra { color: var(--err); }
-  .text-display .char.current {
+  .text-track .char.correct { color: var(--ok); }
+  .text-track .char.incorrect { color: var(--err); background: rgba(255, 93, 93, 0.12); border-radius: 2px; }
+  .text-track .char.current {
     color: var(--text);
     border-bottom: 2px solid var(--accent);
     animation: blink 1s step-end infinite;
@@ -190,7 +194,9 @@
       </div>
     </div>
 
-    <div class="text-display" id="textDisplay"></div>
+    <div class="text-viewport" id="textViewport">
+      <div class="text-track" id="textTrack"></div>
+    </div>
     <p class="hint" id="hint">Timer starts on your first keystroke. Type the text above.</p>
 
     <div class="results hidden" id="results">
@@ -210,9 +216,11 @@
   "use strict";
 
   var TEST_TEXT = "The quick brown fox jumps over the lazy dog while the farmer watches the sunset glow across the valley.";
-  var DURATION = 30; // seconds
+  var DURATION = 30;
+  var ANCHOR = 0.3; // current char sits at 30% from left edge of viewport
 
-  var textDisplay = document.getElementById("textDisplay");
+  var textViewport = document.getElementById("textViewport");
+  var textTrack = document.getElementById("textTrack");
   var timeDisplay = document.getElementById("timeDisplay");
   var wpmDisplay = document.getElementById("wpmDisplay");
   var accDisplay = document.getElementById("accDisplay");
@@ -223,13 +231,14 @@
   var rCorrect = document.getElementById("rCorrect");
   var rWrong = document.getElementById("rWrong");
 
-  var typed = "";            // user input so far (max length of TEST_TEXT)
+  var typed = "";
   var started = false;
   var finished = false;
   var startTime = 0;
   var rafId = null;
-  var correctTotal = 0;      // cumulative correct keystrokes
-  var wrongTotal = 0;        // cumulative wrong keystrokes
+  var correctTotal = 0;
+  var wrongTotal = 0;
+  var charEls = []; // cache of span elements
 
   function render() {
     var html = "";
@@ -245,18 +254,26 @@
       }
       html += '<span class="' + cls + '">' + safe + "</span>";
     }
-    textDisplay.innerHTML = html;
-    scrollToCursor();
+    textTrack.innerHTML = html;
+    charEls = textTrack.querySelectorAll(".char");
+    shiftTrack();
   }
 
-  function scrollToCursor() {
-    var current = textDisplay.querySelector(".char.current");
-    if (!current) return;
-    var container = textDisplay;
-    var charLeft = current.offsetLeft;
-    var target = charLeft - container.clientWidth * 0.3;
-    target = Math.max(0, Math.min(target, container.scrollWidth - container.clientWidth));
-    container.scrollLeft = target;
+  function shiftTrack() {
+    var idx = started && !finished ? typed.length : 0;
+    if (idx >= charEls.length) return;
+    var el = charEls[idx];
+    if (!el) return;
+    var viewportW = textViewport.clientWidth;
+    // el.offsetLeft is relative to textTrack (its offsetParent)
+    var charLeft = el.offsetLeft;
+    // We want: charLeft - translateX = viewportW * ANCHOR
+    var tx = charLeft - viewportW * ANCHOR;
+    // Clamp: don't scroll past start (tx <= 0 means text is at beginning)
+    // and don't scroll past end
+    var maxTx = textTrack.scrollWidth - viewportW;
+    tx = Math.max(0, Math.min(tx, Math.max(0, maxTx)));
+    textTrack.style.transform = "translateX(" + (-tx) + "px)";
   }
 
   function elapsed() {
@@ -267,9 +284,7 @@
     var t = elapsed();
     if (t <= 0) return 0;
     var minutes = t / 60;
-    // Standard: gross chars typed / 5, per minute
-    var gross = typed.length;
-    return Math.round(gross / 5 / minutes);
+    return Math.round(typed.length / 5 / minutes);
   }
 
   function computeAccuracy() {
@@ -307,21 +322,8 @@
     rAcc.textContent = acc.toFixed(1) + "%";
     rCorrect.textContent = correctTotal;
     rWrong.textContent = wrongTotal;
-    textDisplay.innerHTML = renderTextFinal();
     hint.classList.add("hidden");
     results.classList.remove("hidden");
-  }
-
-  function renderTextFinal() {
-    var html = "", i;
-    for (i = 0; i < TEST_TEXT.length; i++) {
-      var ch = TEST_TEXT[i];
-      var safe = ch === " " ? "&nbsp;" : ch.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      var cls = "char";
-      if (i < typed.length) cls += typed[i] === ch ? " correct" : " incorrect";
-      html += '<span class="' + cls + '">' + safe + "</span>";
-    }
-    return html;
   }
 
   function start() {
@@ -341,7 +343,7 @@
       render();
       return;
     }
-    if (e.key.length !== 1) return; // ignore Tab, arrows, etc.
+    if (e.key.length !== 1) return;
     if (typed.length >= TEST_TEXT.length) return;
 
     e.preventDefault();
@@ -372,8 +374,13 @@
     hint.textContent = "Timer starts on your first keystroke. Type the text above.";
     results.classList.add("hidden");
     render();
-    textDisplay.scrollLeft = 0;
+    textTrack.style.transform = "translateX(0)";
   }
+
+  // Re-shift on window resize
+  window.addEventListener("resize", function() {
+    if (!finished) shiftTrack();
+  });
 
   document.addEventListener("keydown", onKey);
   document.getElementById("restartBtn").addEventListener("click", reset);
